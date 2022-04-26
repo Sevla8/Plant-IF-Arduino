@@ -1,3 +1,5 @@
+#include <VariableTimedAction.h>
+
 
 #include <SPI.h>
 #include <WiFiNINA.h>
@@ -8,13 +10,13 @@
   This sketch connects to a website (http://www.google.com)
   using a WiFi shield.
   
-  This example is written for a network using WPA encryption. For
+  This example is written for a network using WPA encry
+  by dlf (Metodo2 srl)ption. For
   WEP or WPA, change the Wifi.begin() call accordingly.
 
   Circuit:
   * WiFi shield attached
   created 13 July 2010
-  by dlf (Metodo2 srl)
   modified 31 May 2012
   by Tom Igoe
 */
@@ -29,12 +31,73 @@ int status = WL_IDLE_STATUS;
 
 // if you don't want to use DNS (and reduce your sketch size)
 // use the numeric IP instead of the name for the server:
-IPAddress server(192,168,43,216);
+IPAddress serverAddr(192,168,43,216);
 
 // Initialize the Ethernet client library
 // with the IP address and port of the server
 // that you want to connect to (port 80 is default for HTTP):
 WiFiClient client;
+
+void sendJson(WiFiClient& client, JsonDocument& doc) {
+  String json;
+  serializeJson(doc, json);
+  // Make a HTTP request:
+  client.println("PUT /root.json HTTP/1.1");
+  client.println("Host: Arduino");
+  client.print("Content-Length: ");
+  client.println(json.length());
+  client.println();
+  client.println(json);
+}
+
+//Wait for client instructions
+class ServerListening : public VariableTimedAction {
+private:
+  unsigned long run() {
+    
+    //return code of 0 indicates no change to the interval
+    //if the interval must be changed, then return the new interval
+    return 0;
+  }
+};
+//RetreiveSensorData
+class GetSensorData : public VariableTimedAction {
+private:
+  unsigned long run() {
+    // if you get a connection, report back via serial:
+    if (client.connect(serverAddr, 3000)) {
+      Serial.println("connected to server");
+      StaticJsonDocument<200> doc;
+      doc["light"] = analogRead(A0);
+      doc["temperature"] = analogRead(A1);
+      doc["moisture"] = analogRead(A2);
+      sendJson(client, doc);
+    }
+    
+    // if there are incoming bytes available
+    // from the server, read them and print them:
+    while (client.available()) {
+      char c = client.read();
+      Serial.write(c);
+    }
+  
+    // if the server's disconnected, stop the client:
+    if (!client.connected()) {
+      Serial.println();
+      Serial.println("disconnecting from server.");
+      client.stop();
+  
+      // do nothing forevermore:
+      while (true);
+    }
+    //return code of 0 indicates no change to the interval
+    //if the interval must be changed, then return the new interval
+    return 0;
+  }
+};
+
+ServerListening server;
+GetSensorData sensor;
 
 void setup() {
   //Initialize serial and wait for port to open:
@@ -72,34 +135,12 @@ void setup() {
 
   Serial.println("\nStarting connection to server...");
 
-  // if you get a connection, report back via serial:
-  if (client.connect(server, 3000)) {
-    Serial.println("connected to server");
-    StaticJsonDocument<200> doc;
-    doc["light"] = analogRead(A0);
-    doc["temperature"] = analogRead(A1);
-    doc["moisture"] = analogRead(A2);
-    sendJson(client, doc);
-  }
+  server.start(1000);
+  sensor.start(5*60*1000);
 }
 
 void loop() {
-  // if there are incoming bytes available
-  // from the server, read them and print them:
-  while (client.available()) {
-    char c = client.read();
-    Serial.write(c);
-  }
-
-  // if the server's disconnected, stop the client:
-  if (!client.connected()) {
-    Serial.println();
-    Serial.println("disconnecting from server.");
-    client.stop();
-
-    // do nothing forevermore:
-    while (true);
-  }
+  VariableTimedAction::updateActions();
 }
 
 void printWifiStatus() {
@@ -117,16 +158,4 @@ void printWifiStatus() {
   Serial.print("signal strength (RSSI):");
   Serial.print(rssi);
   Serial.println(" dBm");
-}
-
-void sendJson(WiFiClient& client, JsonDocument& doc) {
-  String json;
-  serializeJson(doc, json);
-  // Make a HTTP request:
-  client.println("PUT /root.json HTTP/1.1");
-  client.println("Host: Arduino");
-  client.print("Content-Length: ");
-  client.println(json.length());
-  client.println();
-  client.println(json);
 }
