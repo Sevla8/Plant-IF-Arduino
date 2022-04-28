@@ -21,9 +21,9 @@
   by Tom Igoe
 */
 
-char ssid[] = "HUAWEI P20 lite"; //  your network SSID (name)
+char ssid[] = "Pixel_6968"; //  your network SSID (name)
 
-char pass[] = "motdepasse";    // your network password (use for WPA, or use as key for WEP)
+char pass[] = "e52d936d98bf";    // your network password (use for WPA, or use as key for WEP)
 
 int keyIndex = 0;            // your network key Index number (needed only for WEP)
 
@@ -31,12 +31,16 @@ int status = WL_IDLE_STATUS;
 
 // if you don't want to use DNS (and reduce your sketch size)
 // use the numeric IP instead of the name for the server:
-IPAddress serverAddr(192,168,43,216);
+IPAddress serverAddr(192,168,254,160);
 
 // Initialize the Ethernet client library
 // with the IP address and port of the server
 // that you want to connect to (port 80 is default for HTTP):
 WiFiClient client;
+
+WiFiServer server(80);
+
+WiFiClient clientServer;
 
 void sendJson(WiFiClient& client, JsonDocument& doc) {
   String json;
@@ -54,49 +58,76 @@ void sendJson(WiFiClient& client, JsonDocument& doc) {
 class ServerListening : public VariableTimedAction {
 private:
   unsigned long run() {
-    
-    //return code of 0 indicates no change to the interval
-    //if the interval must be changed, then return the new interval
-    return 0;
-  }
-};
-//RetreiveSensorData
-class GetSensorData : public VariableTimedAction {
-private:
-  unsigned long run() {
-    // if you get a connection, report back via serial:
-    if (client.connect(serverAddr, 3000)) {
-      Serial.println("connected to server");
-      StaticJsonDocument<200> doc;
-      doc["light"] = analogRead(A0);
-      doc["temperature"] = analogRead(A1);
-      doc["moisture"] = analogRead(A2);
-      sendJson(client, doc);
+    // listen for incoming clients
+    clientServer = server.available();
+    if (clientServer) {
+      if (clientServer.connected()) {
+        Serial.println("Connected to client");
+        while (clientServer.available()) {
+          char c = clientServer.read();
+          Serial.write(c);
+        }
+        
+        // close the connection:
+        clientServer.stop();
+      }
     }
     
-    // if there are incoming bytes available
-    // from the server, read them and print them:
-    while (client.available()) {
-      char c = client.read();
-      Serial.write(c);
-    }
-  
-    // if the server's disconnected, stop the client:
-    if (!client.connected()) {
-      Serial.println();
-      Serial.println("disconnecting from server.");
-      client.stop();
-  
-      // do nothing forevermore:
-      while (true);
-    }
     //return code of 0 indicates no change to the interval
     //if the interval must be changed, then return the new interval
     return 0;
   }
 };
 
-ServerListening server;
+//RetreiveSensorData
+class GetSensorData : public VariableTimedAction {
+private:
+  unsigned long run() {
+    // if you get a connection, report back via serial:
+    if (client.connect(serverAddr, 3000)) {
+      Serial.print("Sending data... ");
+      StaticJsonDocument<200> doc;
+
+      // Get the value of the light sensor.
+      doc["light"] = analogRead(A0);
+
+      // Get the value of the temperature sensor.
+      int value = analogRead(A1);
+      // Determine the current resistence of the thermistor based on the sensor value.
+      float resistance = (float) (1023 - value) * 10000 / value;
+      // Calculare the temperature based on the resistence value.
+      doc["temperature"] = 1 / (log(resistance / 10000) / 3975 + 1 / 298.15) - 273.15;
+
+      // Get the value of the moisture sensor.
+      doc["moisture"] = analogRead(A2);
+      
+      sendJson(client, doc);
+      Serial.println("Data sent.");
+    }
+    
+//    // if there are incoming bytes available
+//    // from the server, read them and print them:
+//    while (client.available()) {
+//      char c = client.read();
+//      Serial.write(c);
+//    }
+//  
+//    // if the server's disconnected, stop the client:
+//    if (!client.connected()) {
+//      Serial.println();
+//      Serial.println("disconnecting from server.");
+//      client.stop();
+//  
+//      // do nothing forevermore:
+//      while (true);
+//    }
+//    //return code of 0 indicates no change to the interval
+//    //if the interval must be changed, then return the new interval
+    return 0;
+  }
+};
+
+ServerListening serverListening;
 GetSensorData sensor;
 
 void setup() {
@@ -135,8 +166,10 @@ void setup() {
 
   Serial.println("\nStarting connection to server...");
 
-  server.start(1000);
-  sensor.start(5*60*1000);
+  server.begin();
+  
+  serverListening.start(1000);
+  sensor.start(10*1000);
 }
 
 void loop() {
