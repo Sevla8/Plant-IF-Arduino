@@ -21,6 +21,12 @@
   by Tom Igoe
 */
 
+/*
+ * How to change the delay from the server :
+ * curl http://192.168.254.118 -H 'Content-Type: application/json' -d '{"type":"delay","delay":10000}'
+ * 
+ */
+
 char ssid[] = "Pixel_6968"; //  your network SSID (name)
 
 char pass[] = "e52d936d98bf";    // your network password (use for WPA, or use as key for WEP)
@@ -44,6 +50,8 @@ WiFiClient clientServer;
 
 String LOC_SEND_DATA = "/root.json";
 
+long captureDelay = 10 * 1000; // 10 sec
+
 void sendJson(WiFiClient& client, JsonDocument& doc, String& loc) {
   String json;
   serializeJson(doc, json);
@@ -58,16 +66,25 @@ void sendJson(WiFiClient& client, JsonDocument& doc, String& loc) {
   client.println(json);
 }
 
-void getJson(WiFiClient& client, JsonDocument& doc, String& loc) {
-  //TODO Change that
+void getJson(WiFiClient& client, JsonDocument& doc) {
+  char rc1 = '.';
+  char rc2 = '.';
   while (client.available()) {
     char c = client.read();
-    Serial.write(c);
+//    Serial.write(c);
+    if (c == '\r') {
+      continue;
+    }
+    rc1 = c;
+    if (rc1 == '\n' && rc2 == '\n') {
+      break;
+    }
+    rc2 = rc1;
   }
   deserializeJson(doc, client);
 }
 
-//Wait for client instructions
+// Wait for client instructions
 class ServerListening : public VariableTimedAction {
 private:
   unsigned long run() {
@@ -77,9 +94,19 @@ private:
       if (clientServer.connected()) {
         Serial.println("Connected to client");
 
-        String loc;
-        DynamicJsonDocument doc(1024);
-        getJson(client, doc, loc);
+        DynamicJsonDocument doc(256);
+        getJson(clientServer, doc);
+
+//        Serial.print("doc['type'] = ");
+//        Serial.println((char*) doc["type"]);
+        if (doc["type"] == "delay") {
+          captureDelay = doc["delay"];
+//          Serial.print("doc['delay'] = ");
+//          Serial.println((long) doc["delay"]);
+        }
+        else if (doc["type"] == "get") {
+          
+        }
         
         // close the connection:
         clientServer.stop();
@@ -92,7 +119,7 @@ private:
   }
 };
 
-//RetreiveSensorData
+// RetreiveSensorData
 class GetSensorData : public VariableTimedAction {
 private:
   unsigned long run() {
@@ -100,6 +127,21 @@ private:
     if (client.connect(serverAddr, 3000)) {
       Serial.print("Sending data... ");
       StaticJsonDocument<200> doc;
+
+      // Request the current time
+      WiFiClient timeClient;
+      timeClient.connect("worldtimeapi.org", 80);
+      timeClient.print("GET ");
+      timeClient.print("/api/timezone/Etc/UTC");
+      timeClient.println(" HTTP/1.1");
+      timeClient.println("Host: Arduino");
+      timeClient.println();
+      StaticJsonDocument<2048> timeDoc;
+      while (!timeClient.available()) {
+        ;
+      }
+      getJson(timeClient, timeDoc);
+      timeClient.stop();
 
       // Get the value of the light sensor.
       doc["light"] = analogRead(A0);
@@ -113,7 +155,10 @@ private:
 
       // Get the value of the moisture sensor.
       doc["moisture"] = analogRead(A2);
-      
+
+      // Get the time
+      doc["time"] = timeDoc["unixtime"];
+
       sendJson(client, doc, LOC_SEND_DATA);
       Serial.println("Data sent.");
     }
@@ -136,7 +181,7 @@ private:
 //    }
 //    //return code of 0 indicates no change to the interval
 //    //if the interval must be changed, then return the new interval
-    return 0;
+    return captureDelay;
   }
 };
 
@@ -164,7 +209,7 @@ void setup() {
     Serial.println("Please upgrade the firmware");
   }
 
-  // attempt to connect to Wifi network:
+  // Attempt to connect to Wifi network:
   while (status != WL_CONNECTED) {
     Serial.print("Attempting to connect to SSID: ");
     Serial.println(ssid);
@@ -182,7 +227,7 @@ void setup() {
   server.begin();
   
   serverListening.start(1000);
-  sensor.start(10*1000);
+  sensor.start(captureDelay);
 }
 
 void loop() {
