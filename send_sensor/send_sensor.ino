@@ -42,16 +42,29 @@ WiFiServer server(80);
 
 WiFiClient clientServer;
 
-void sendJson(WiFiClient& client, JsonDocument& doc) {
+String LOC_SEND_DATA = "/root.json";
+
+void sendJson(WiFiClient& client, JsonDocument& doc, String& loc) {
   String json;
   serializeJson(doc, json);
   // Make a HTTP request:
-  client.println("PUT /root.json HTTP/1.1");
+  client.print("PUT ");
+  client.print(loc);
+  client.println(" HTTP/1.1");
   client.println("Host: Arduino");
   client.print("Content-Length: ");
   client.println(json.length());
   client.println();
   client.println(json);
+}
+
+void getJson(WiFiClient& client, JsonDocument& doc, String& loc) {
+  //TODO Change that
+  while (client.available()) {
+    char c = client.read();
+    Serial.write(c);
+  }
+  deserializeJson(doc, client);
 }
 
 //Wait for client instructions
@@ -63,10 +76,10 @@ private:
     if (clientServer) {
       if (clientServer.connected()) {
         Serial.println("Connected to client");
-        while (clientServer.available()) {
-          char c = clientServer.read();
-          Serial.write(c);
-        }
+
+        String loc;
+        DynamicJsonDocument doc(1024);
+        getJson(client, doc, loc);
         
         // close the connection:
         clientServer.stop();
@@ -101,7 +114,7 @@ private:
       // Get the value of the moisture sensor.
       doc["moisture"] = analogRead(A2);
       
-      sendJson(client, doc);
+      sendJson(client, doc, LOC_SEND_DATA);
       Serial.println("Data sent.");
     }
     
