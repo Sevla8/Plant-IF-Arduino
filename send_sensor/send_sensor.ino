@@ -1,3 +1,7 @@
+#include <StreamUtils.h>
+
+#include <MemoryUsage.h>
+
 #include <VariableTimedAction.h>
 
 
@@ -27,9 +31,9 @@
  * 
  */
 
-char ssid[] = "Pixel_6968"; //  your network SSID (name)
+char ssid[] = "HUAWEI P20 lite"; // "Pixel_6968"; //  your network SSID (name)
 
-char pass[] = "e52d936d98bf";    // your network password (use for WPA, or use as key for WEP)
+char pass[] = "motdepasse"; // "e52d936d98bf";    // your network password (use for WPA, or use as key for WEP)
 
 int keyIndex = 0;            // your network key Index number (needed only for WEP)
 
@@ -37,7 +41,7 @@ int status = WL_IDLE_STATUS;
 
 // if you don't want to use DNS (and reduce your sketch size)
 // use the numeric IP instead of the name for the server:
-IPAddress serverAddr(192,168,254,160);
+IPAddress serverAddr(192,168,43,200);
 
 // Initialize the Ethernet client library
 // with the IP address and port of the server
@@ -48,20 +52,22 @@ WiFiServer server(80);
 
 WiFiClient clientServer;
 
-String LOC_SEND_DATA = "/root.json";
+const String LOC_SEND_DATA = "/SMARTweb/ActionServlet";
 
-long captureDelay = 10 * 1000; // 10 sec
+const String ID = "TEST01";
 
-void sendJson(WiFiClient& client, JsonDocument& doc, String& loc) {
+const int NB_MIN_SENSORS = 12;
+const int NB_MAX_SENSORS = 15;
+
+long captureDelay = 500; // 10 sec
+
+void sendJson(WiFiClient& client, JsonDocument& doc) {
   String json;
   serializeJson(doc, json);
-  // Make a HTTP request:
-  client.print("PUT ");
-  client.print(loc);
-  client.println(" HTTP/1.1");
   client.println("Host: Arduino");
   client.print("Content-Length: ");
   client.println(json.length());
+  client.println("Content-Type: application/json");
   client.println();
   client.println(json);
 }
@@ -84,6 +90,88 @@ void getJson(WiFiClient& client, JsonDocument& doc) {
   deserializeJson(doc, client);
 }
 
+DynamicJsonDocument sensorDataDoc(2048);
+int replIndex;
+
+void initTable() {
+  sensorDataDoc.clear();
+  sensorDataDoc["todo"] = "newRecord";
+  sensorDataDoc["arduinoNumber"] = ID;
+  sensorDataDoc.createNestedArray("data");
+  replIndex = 0;
+}
+
+// RetreiveSensorData
+class GetSensorData : public VariableTimedAction {
+private:
+  unsigned long run() {
+    
+      // Request the current time
+      WiFiClient timeClient;
+      timeClient.connect("worldtimeapi.org", 80);
+      timeClient.print("GET ");
+      timeClient.print("/api/timezone/Etc/UTC");
+      timeClient.println(" HTTP/1.1");
+      timeClient.println("Host: Arduino");
+      timeClient.println();
+      StaticJsonDocument<512> timeDoc;
+      int wait = 0;
+      while (!timeClient.available() && wait<9000) {
+        delay(1);
+        ++wait;
+      }
+      getJson(timeClient, timeDoc);
+      timeClient.stop();
+
+      JsonObject obj;
+      if (sensorDataDoc["data"].size()>=NB_MAX_SENSORS) {
+        obj = sensorDataDoc["data"][replIndex++];
+        replIndex %= sensorDataDoc["data"].size();
+      }
+      else {
+        obj = sensorDataDoc["data"].createNestedObject();
+      }
+      // Get the value of the light sensor.
+      obj["light"] = analogRead(A0);
+
+      // Get the value of the temperature sensor.
+      int value = analogRead(A1);
+      // Determine the current resistence of the thermistor based
+      // on the sensor value.
+      float resistance = (float) (1023 - value) * 10000 / value;
+      // Calculare the temperature based on the resistence value.
+      obj["temperature"] = 1 / (log(resistance / 10000) / 3975 + 1 / 298.15) - 273.15;
+
+      // Get the value of the moisture sensor.
+      obj["moisture"] = analogRead(A2);
+
+      // Get the time
+      obj["time"] = timeDoc["unixtime"];
+    // if you get a connection, report back via serial:
+    Serial.println(sensorDataDoc.memoryUsage());
+    if (sensorDataDoc["data"].size()>=NB_MAX_SENSORS) {
+      if (client.connect(serverAddr, 8080)) {
+        Serial.print("Sending data... ");
+  
+        // Make a HTTP request:
+        client.print("POST ");
+        client.print(LOC_SEND_DATA);
+        client.println(" HTTP/1.1");
+
+        sendJson(client, sensorDataDoc);
+        Serial.println("Data sent.");
+        initTable();
+      }
+    }
+
+//    //return code of 0 indicates no change to the interval
+//    //if the interval must be changed, then return the new interval
+    return captureDelay;
+  }
+};
+
+GetSensorData sensor;
+
 // Wait for client instructions
 class ServerListening : public VariableTimedAction {
 private:
@@ -103,9 +191,21 @@ private:
           captureDelay = doc["delay"];
 //          Serial.print("doc['delay'] = ");
 //          Serial.println((long) doc["delay"]);
+            sensor.stop();
+            sensor.start(captureDelay);
+            clientServer.println("HTTP/1.1 200 OK");
+            clientServer.println("");
         }
         else if (doc["type"] == "get") {
-          
+            
+            Serial.print("Sending data... ");
+      
+            // Make a HTTP request:
+            clientServer.println("HTTP/1.1 200 OK");
+        
+            sendJson(clientServer, sensorDataDoc);
+            Serial.println("Data sent.");
+            initTable();
         }
         
         // close the connection:
@@ -119,74 +219,7 @@ private:
   }
 };
 
-// RetreiveSensorData
-class GetSensorData : public VariableTimedAction {
-private:
-  unsigned long run() {
-    // if you get a connection, report back via serial:
-    if (client.connect(serverAddr, 3000)) {
-      Serial.print("Sending data... ");
-      StaticJsonDocument<200> doc;
-
-      // Request the current time
-      WiFiClient timeClient;
-      timeClient.connect("worldtimeapi.org", 80);
-      timeClient.print("GET ");
-      timeClient.print("/api/timezone/Etc/UTC");
-      timeClient.println(" HTTP/1.1");
-      timeClient.println("Host: Arduino");
-      timeClient.println();
-      StaticJsonDocument<2048> timeDoc;
-      while (!timeClient.available()) {
-        ;
-      }
-      getJson(timeClient, timeDoc);
-      timeClient.stop();
-
-      // Get the value of the light sensor.
-      doc["light"] = analogRead(A0);
-
-      // Get the value of the temperature sensor.
-      int value = analogRead(A1);
-      // Determine the current resistence of the thermistor based on the sensor value.
-      float resistance = (float) (1023 - value) * 10000 / value;
-      // Calculare the temperature based on the resistence value.
-      doc["temperature"] = 1 / (log(resistance / 10000) / 3975 + 1 / 298.15) - 273.15;
-
-      // Get the value of the moisture sensor.
-      doc["moisture"] = analogRead(A2);
-
-      // Get the time
-      doc["time"] = timeDoc["unixtime"];
-
-      sendJson(client, doc, LOC_SEND_DATA);
-      Serial.println("Data sent.");
-    }
-    
-//    // if there are incoming bytes available
-//    // from the server, read them and print them:
-//    while (client.available()) {
-//      char c = client.read();
-//      Serial.write(c);
-//    }
-//  
-//    // if the server's disconnected, stop the client:
-//    if (!client.connected()) {
-//      Serial.println();
-//      Serial.println("disconnecting from server.");
-//      client.stop();
-//  
-//      // do nothing forevermore:
-//      while (true);
-//    }
-//    //return code of 0 indicates no change to the interval
-//    //if the interval must be changed, then return the new interval
-    return captureDelay;
-  }
-};
-
 ServerListening serverListening;
-GetSensorData sensor;
 
 void setup() {
   //Initialize serial and wait for port to open:
@@ -226,6 +259,7 @@ void setup() {
 
   server.begin();
   
+  initTable();
   serverListening.start(1000);
   sensor.start(captureDelay);
 }
