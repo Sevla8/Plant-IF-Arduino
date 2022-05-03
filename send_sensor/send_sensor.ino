@@ -10,25 +10,17 @@
 #include <ArduinoJson.h>
 
 /*
-  Web client
-  This sketch connects to a website (http://www.google.com)
-  using a WiFi shield.
-  
-  This example is written for a network using WPA encry
-  by dlf (Metodo2 srl)ption. For
-  WEP or WPA, change the Wifi.begin() call accordingly.
-
-  Circuit:
-  * WiFi shield attached
-  created 13 July 2010
-  modified 31 May 2012
-  by Tom Igoe
+ * \brief Reads the sensor data and sends it
+ * to the server
+ * 
+ * WiFi connection code based on example
+ * by Tom Igoe
+ * \author H4224
 */
 
 /*
  * How to change the delay from the server :
  * curl http://192.168.254.118 -H 'Content-Type: application/json' -d '{"type":"delay","delay":10000}'
- * 
  */
 
 char ssid[] = "HUAWEI P20 lite"; // "Pixel_6968"; //  your network SSID (name)
@@ -164,8 +156,8 @@ private:
       }
     }
 
-//    //return code of 0 indicates no change to the interval
-//    //if the interval must be changed, then return the new interval
+    //return code of 0 indicates no change to the interval
+    //if the interval must be changed, then return the new interval
     return captureDelay;
   }
 };
@@ -180,17 +172,13 @@ private:
     clientServer = server.available();
     if (clientServer) {
       if (clientServer.connected()) {
-        Serial.println("Connected to client");
+        Serial.println("Client Request");
 
         DynamicJsonDocument doc(256);
         getJson(clientServer, doc);
 
-//        Serial.print("doc['type'] = ");
-//        Serial.println((char*) doc["type"]);
         if (doc["type"] == "delay") {
           captureDelay = doc["delay"];
-//          Serial.print("doc['delay'] = ");
-//          Serial.println((long) doc["delay"]);
             sensor.stop();
             sensor.start(captureDelay);
             clientServer.println("HTTP/1.1 200 OK");
@@ -198,7 +186,7 @@ private:
         }
         else if (doc["type"] == "get") {
             
-            Serial.print("Sending data... ");
+            Serial.print("Sending requested data... ");
       
             // Make a HTTP request:
             clientServer.println("HTTP/1.1 200 OK");
@@ -254,8 +242,6 @@ void setup() {
   Serial.println("Connected to wifi");
 
   printWifiStatus();
-
-  Serial.println("\nStarting connection to server...");
 
   server.begin();
   
