@@ -1,7 +1,3 @@
-#include <StreamUtils.h>
-
-#include <MemoryUsage.h>
-
 #include <VariableTimedAction.h>
 
 
@@ -49,19 +45,18 @@ const String LOC_SEND_DATA = "/SMARTweb/ActionServlet";
 const String ID = "TEST01";
 
 const int NB_MIN_SENSORS = 12;
-const int NB_MAX_SENSORS = 15;
+const int NB_MAX_SENSORS = 30;
 
-long captureDelay = 500; // 10 sec
+long captureDelay = 5000; // 5 sec
 
 void sendJson(WiFiClient& client, JsonDocument& doc) {
   String json;
-  serializeJson(doc, json);
   client.println("Host: Arduino");
   client.print("Content-Length: ");
-  client.println(json.length());
+  client.println(measureJson(doc));
   client.println("Content-Type: application/json");
   client.println();
-  client.println(json);
+  serializeJson(doc, client);
 }
 
 void getJson(WiFiClient& client, JsonDocument& doc) {
@@ -106,13 +101,13 @@ private:
       timeClient.println(" HTTP/1.1");
       timeClient.println("Host: Arduino");
       timeClient.println();
-      StaticJsonDocument<512> timeDoc;
+      StaticJsonDocument<512> respDoc;
       int wait = 0;
       while (!timeClient.available() && wait<9000) {
         delay(1);
         ++wait;
       }
-      getJson(timeClient, timeDoc);
+      getJson(timeClient, respDoc);
       timeClient.stop();
 
       JsonObject obj;
@@ -123,6 +118,10 @@ private:
       else {
         obj = sensorDataDoc["data"].createNestedObject();
       }
+      
+      // Get the time
+      obj["time"] = respDoc["unixtime"];
+      
       // Get the value of the light sensor.
       obj["light"] = analogRead(A0);
 
@@ -136,12 +135,10 @@ private:
 
       // Get the value of the moisture sensor.
       obj["moisture"] = analogRead(A2);
-
-      // Get the time
-      obj["time"] = timeDoc["unixtime"];
+      
     // if you get a connection, report back via serial:
     Serial.println(sensorDataDoc.memoryUsage());
-    if (sensorDataDoc["data"].size()>=NB_MAX_SENSORS) {
+    if (sensorDataDoc["data"].size()>=NB_MIN_SENSORS) {
       if (client.connect(serverAddr, 8080)) {
         Serial.print("Sending data... ");
   
@@ -152,6 +149,14 @@ private:
 
         sendJson(client, sensorDataDoc);
         Serial.println("Data sent.");
+        int wait = 0;
+        while (!client.available() && wait<9000) {
+          delay(1);
+          ++wait;
+        }
+        getJson(client, respDoc);
+        serializeJson(respDoc, Serial);
+        client.stop();
         initTable();
       }
     }
